@@ -55,11 +55,13 @@ class PaystackGateway implements PaymentGatewayInterface
 
     public function createPlan(PlanData $plan): PlanResult
     {
+        $currency = $this->resolveCurrency($plan->currency);
+
         $response = $this->client()->post('/plan', $this->filterPayload([
             'name' => $plan->name,
             'amount' => $plan->amountInMinor,
             'interval' => $plan->interval,
-            'currency' => $plan->currency,
+            'currency' => $currency,
             'description' => $plan->description,
             'invoice_limit' => $plan->invoiceLimit,
         ]));
@@ -76,18 +78,20 @@ class PaystackGateway implements PaymentGatewayInterface
             name: (string) ($data['name'] ?? $plan->name),
             interval: (string) ($data['interval'] ?? $plan->interval),
             amountInMinor: (int) ($data['amount'] ?? $plan->amountInMinor),
-            currency: (string) ($data['currency'] ?? $plan->currency),
+            currency: (string) ($data['currency'] ?? $currency),
             raw: (array) $response->json(),
         );
     }
 
     public function initializeCheckout(CheckoutInitializationData $checkout): CheckoutInitializationResult
     {
+        $currency = $this->resolveCurrency($checkout->currency);
+
         $response = $this->client()->post('/transaction/initialize', $this->filterPayload([
             'email' => $checkout->email,
             'amount' => $checkout->amountInMinor,
             'reference' => $checkout->reference,
-            'currency' => $checkout->currency,
+            'currency' => $currency,
             'callback_url' => $checkout->callbackUrl,
             'plan' => $checkout->planCode,
             'customer' => $checkout->customerCode,
@@ -225,5 +229,18 @@ class PaystackGateway implements PaymentGatewayInterface
     private function filterPayload(array $payload): array
     {
         return array_filter($payload, fn ($value) => $value !== null && $value !== []);
+    }
+
+    private function resolveCurrency(?string $currency = null): string
+    {
+        $resolved = strtoupper(trim((string) ($currency ?? $this->config['currency'] ?? '')));
+
+        if ($resolved === '') {
+            throw new PaymentGatewayException(
+                'Paystack currency is required. Set paystack.paystack.currency or pass a currency per request.'
+            );
+        }
+
+        return $resolved;
     }
 }

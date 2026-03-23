@@ -1,7 +1,7 @@
 {
     "version": "1.0.0",
     "name": "rainwaves/paystack-payment",
-    "description": "Laravel Paystack payment package for Rainwaves applications.",
+    "description": "Laravel package for Paystack single payments, subscriptions, webhooks, and refunds.",
     "keywords": [
         "rainwaves",
         "paystack-payment",
@@ -27,6 +27,11 @@
             "rainwaves\\PaystackPayment\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "rainwaves\\PaystackPayment\\Tests\\": "tests/"
+        }
+    },
     "extra": {
         "laravel": {
             "providers": [
@@ -38,5 +43,8 @@
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "require-dev": {
+        "phpunit/phpunit": "^11.5"
+    }
 }

@@ -1,28 +1,35 @@
-# Paystack Payment
+# Paystack Payment Package
 
-`rainwaves/paystack-payment` is a Laravel Paystack payment package for Rainwaves applications.
+This is a Laravel package for integrating with the Paystack payment gateway. It supports customer creation, recurring plans, single payments, transaction verification, webhook verification, and refunds.
 
-## Scope
+## Installation
 
-This package is intended to support host applications that need:
-- payment customer creation
-- provider plan creation
-- checkout initialization
-- transaction verification
-- webhook verification
-- refunds
+You can install the package via Composer:
 
-The package does not contain application-specific subscription activation logic. That remains the responsibility of the host app.
-
-## Current Driver
-
-- `paystack`
+```bash
+composer require rainwaves/paystack-payment
+```
 
 ## Configuration
 
-The package publishes and reads the `paystack` config file.
+Publish the config file in your Laravel application:
 
-Example keys:
+```bash
+php artisan vendor:publish --provider="rainwaves\\PaystackPayment\\PaystackServiceProvider"
+```
+
+Set the Paystack credentials in your `.env` file:
+
+- `PAYSTACK_SECRET_KEY=`
+- `PAYSTACK_PUBLIC_KEY=`
+- `PAYSTACK_WEBHOOK_SECRET=`
+- `PAYSTACK_CALLBACK_URL=`
+- `PAYSTACK_CANCEL_URL=`
+- `PAYSTACK_CURRENCY=ZAR`
+- `PAYSTACK_TIMEOUT=15`
+- `PAYSTACK_RETRY=2`
+
+Example config:
 
 ```php
 return [
@@ -41,30 +48,203 @@ return [
 ];
 ```
 
-## Host App Billing Rule
+## Compatibility
 
-In the current SYNC Discovery integration:
-- plan catalog prices are maintained in `USD`
-- Paystack charges are created in `ZAR`
-- transaction amounts sent to Paystack must be in subunits
+- PHP: 8.2+
+- Laravel: 12.x
 
-Example:
+## Currency Rule
+
+Keep the currency rule simple:
+
+- the package should use the currency configured for the Paystack portfolio
+- set that default in `paystack.paystack.currency`
+- pass a currency in the DTO only when you need to override the configured default
+- all amounts sent to Paystack must be in minor units
+
+Examples:
+
 - `ZAR 125.50` must be sent as `12550`
+- `USD 25.00` must be sent as `2500`
 
-## Main Interfaces
+If your product catalog stores prices in `USD` but the customer is checking out against a `ZAR` Paystack portfolio, convert the amount before calling the package and send the final Paystack currency amount in minor units.
 
-- `rainwaves\PaystackPayment\Contracts\PaymentGatewayInterface`
+## Usage
 
-Key operations exposed by the Paystack driver:
-- create customer
-- create plan
-- initialize checkout
-- verify transaction
-- verify webhook
-- create refund
+The main interface exposed by the package is `rainwaves\PaystackPayment\Contracts\PaymentGatewayInterface`.
+
+### Laravel
+
+```php
+use Illuminate\Http\Request;
+use rainwaves\PaystackPayment\Contracts\PaymentGatewayInterface;
+use rainwaves\PaystackPayment\DTO\CheckoutInitializationData;
+use rainwaves\PaystackPayment\DTO\CustomerData;
+use rainwaves\PaystackPayment\DTO\PlanData;
+use rainwaves\PaystackPayment\DTO\RefundData;
+use rainwaves\PaystackPayment\DTO\WebhookPayload;
+
+class PaymentController extends Controller
+{
+    public function __construct(
+        private readonly PaymentGatewayInterface $payments,
+    ) {}
+
+    public function createCustomer(Request $request)
+    {
+        return $this->payments->createCustomer(new CustomerData(
+            email: $request->string('email')->toString(),
+            firstName: $request->string('first_name')->toString(),
+            lastName: $request->string('last_name')->toString(),
+            phone: $request->string('phone')->toString(),
+            metadata: [
+                'user_id' => $request->user()?->id,
+            ],
+        ));
+    }
+
+    public function createPlan()
+    {
+        return $this->payments->createPlan(new PlanData(
+            name: 'Gold Plan',
+            amountInMinor: 9900,
+            interval: 'monthly',
+            description: 'Monthly Gold subscription',
+        ));
+    }
+
+    public function singlePayment(Request $request)
+    {
+        return $this->payments->initializeCheckout(new CheckoutInitializationData(
+            reference: (string) str()->uuid(),
+            email: $request->string('email')->toString(),
+            amountInMinor: 12550,
+            callbackUrl: config('paystack.paystack.callback_url'),
+            metadata: [
+                'type' => 'single_payment',
+                'order_id' => $request->integer('order_id'),
+            ],
+        ));
+    }
+
+    public function subscriptionPayment(Request $request)
+    {
+        return $this->payments->initializeCheckout(new CheckoutInitializationData(
+            reference: (string) str()->uuid(),
+            email: $request->string('email')->toString(),
+            amountInMinor: 9900,
+            planCode: 'PLN_xxxxxxxx',
+            customerCode: 'CUS_xxxxxxxx',
+            callbackUrl: config('paystack.paystack.callback_url'),
+            metadata: [
+                'type' => 'subscription',
+                'portfolio_id' => $request->integer('portfolio_id'),
+            ],
+        ));
+    }
+
+    public function verifyTransaction(string $reference)
+    {
+        return $this->payments->verifyTransaction($reference);
+    }
+
+    public function refund(string $reference)
+    {
+        return $this->payments->createRefund(new RefundData(
+            transactionReference: $reference,
+            amountInMinor: 9900,
+            reason: 'Customer requested cancellation',
+        ));
+    }
+
+    public function webhook(Request $request)
+    {
+        return $this->payments->verifyWebhook(new WebhookPayload(
+            rawBody: $request->getContent(),
+            headers: $request->headers->all(),
+            payload: $request->all(),
+        ));
+    }
+}
+```
+
+### Single Payments
+
+For one-time payments, initialize checkout without a `planCode`:
+
+```php
+use rainwaves\PaystackPayment\DTO\CheckoutInitializationData;
+
+$checkout = $payments->initializeCheckout(new CheckoutInitializationData(
+    reference: 'ORDER-1001',
+    email: 'customer@example.com',
+    amountInMinor: 12550,
+    metadata: [
+        'type' => 'single_payment',
+        'order_id' => 1001,
+    ],
+));
+
+return redirect()->away($checkout->checkoutUrl);
+```
+
+### Subscriptions
+
+For subscriptions, create the Paystack plan first, then initialize checkout with the returned `planCode`:
+
+```php
+use rainwaves\PaystackPayment\DTO\CheckoutInitializationData;
+use rainwaves\PaystackPayment\DTO\PlanData;
+
+$plan = $payments->createPlan(new PlanData(
+    name: 'Premium Monthly',
+    amountInMinor: 9900,
+    interval: 'monthly',
+));
+
+$checkout = $payments->initializeCheckout(new CheckoutInitializationData(
+    reference: 'SUB-1001',
+    email: 'customer@example.com',
+    amountInMinor: 9900,
+    planCode: $plan->code,
+));
+```
+
+### Optional Fields
+
+- `CheckoutInitializationData::$callbackUrl`
+- `CheckoutInitializationData::$planCode`
+- `CheckoutInitializationData::$customerCode`
+- `CheckoutInitializationData::$metadata`
+- `CheckoutInitializationData::$currency`
+- `PlanData::$description`
+- `PlanData::$invoiceLimit`
+- `PlanData::$metadata`
+- `PlanData::$currency`
+- `RefundData::$amountInMinor`
+- `RefundData::$currency`
+- `RefundData::$reason`
+- `RefundData::$customerNote`
+- `RefundData::$merchantNote`
+
+### Webhooks
+
+The package verifies the Paystack webhook signature using the configured webhook secret:
+
+```php
+$verification = $payments->verifyWebhook(new WebhookPayload(
+    rawBody: $request->getContent(),
+    headers: $request->headers->all(),
+    payload: $request->all(),
+));
+
+if (! $verification->isValid) {
+    abort(401, 'Invalid Paystack webhook signature.');
+}
+```
 
 ## Notes
 
-- Webhook signature verification is handled in the driver using the configured Paystack webhook secret.
-- The package returns structured DTOs so host applications can map provider responses into their own persistence and domain logic.
-- Refund orchestration, local subscription state transitions, and UI flows belong in the host application layer.
+- The package returns DTOs so host applications can map provider responses into their own persistence and business logic.
+- Single-payment and subscription activation flows remain the responsibility of the host application.
+- Refund orchestration and local state transitions belong in the host application layer.
