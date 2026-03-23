@@ -12,6 +12,14 @@ You can install the package via Composer:
 composer require rainwaves/paystack-payment
 ```
 
+For package development:
+
+```bash
+composer install
+composer lint
+composer test
+```
+
 ## Configuration
 
 Publish the config file in your Laravel application:
@@ -54,6 +62,14 @@ return [
 
 - PHP: 8.2+
 - Laravel: 12.x
+
+## Versioning
+
+Package versions should be published with Git tags, not by setting a `version` field in `composer.json`.
+
+Recommended first stable release:
+
+- `v1.0.0`
 
 ## Currency Rule
 
@@ -296,3 +312,9 @@ if ($verification->isSubscriptionCreate()) {
 - The package returns DTOs so host applications can map provider responses into their own persistence and business logic.
 - Single-payment and subscription activation flows remain the responsibility of the host application.
 - Refund orchestration and local state transitions belong in the host application layer.
+
+## Production Checklist
+
+Before tagging a production release, run the checklist in [docs/sandbox-smoke-test.md](/home/eclaims/package-development/rainwaves/paystack-payment/docs/sandbox-smoke-test.md).
+
+The first release notes are in [docs/release-notes-v1.0.0.md](/home/eclaims/package-development/rainwaves/paystack-payment/docs/release-notes-v1.0.0.md).

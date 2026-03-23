@@ -1,14 +1,14 @@
 {
-    "version": "1.0.0",
     "name": "rainwaves/paystack-payment",
     "description": "Laravel package for Paystack single payments, subscriptions, webhooks, and refunds.",
+    "type": "library",
     "keywords": [
         "rainwaves",
         "paystack-payment",
         "payments",
         "paystack"
     ],
-    "homepage": "https://github.com",
+    "homepage": "https://github.com/Magnificent-Big-J/paystack-payment",
     "license": "MIT",
     "authors": [
         {
@@ -32,6 +32,14 @@
             "rainwaves\\PaystackPayment\\Tests\\": "tests/"
         }
     },
+    "scripts": {
+        "lint": [
+            "@php -r \"foreach (['src', 'config', 'tests'] as $dir) { if (!is_dir($dir)) continue; $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir)); foreach ($it as $file) { if ($file->isFile() && $file->getExtension() === 'php') { passthru('php -l '.escapeshellarg($file->getPathname()), $code); if ($code !== 0) exit($code); } } } echo 'PHP lint passed'.PHP_EOL;\""
+        ],
+        "test": [
+            "@php vendor/bin/phpunit --configuration phpunit.xml --testdox"
+        ]
+    },
     "extra": {
         "laravel": {
             "providers": [
@@ -41,6 +49,9 @@
                 "paystack.php"
             ]
         }
+    },
+    "support": {
+        "source": "https://github.com/Magnificent-Big-J/paystack-payment"
     },
     "minimum-stability": "stable",
     "prefer-stable": true,
