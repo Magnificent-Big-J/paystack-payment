@@ -2,6 +2,8 @@
 
 This is a Laravel package for integrating with the Paystack payment gateway. It supports customer creation, recurring plans, single payments, transaction verification, webhook verification, and refunds.
 
+The package includes request validation guards before outbound calls and returns DTOs with transaction details that are useful to Rainwaves host applications.
+
 ## Installation
 
 You can install the package via Composer:
@@ -227,6 +229,40 @@ $checkout = $payments->initializeCheckout(new CheckoutInitializationData(
 - `RefundData::$customerNote`
 - `RefundData::$merchantNote`
 
+### Validation Rules
+
+The package validates common request mistakes before sending anything to Paystack:
+
+- checkout amount must be greater than zero
+- plan amount must be greater than zero
+- refund amount must be greater than zero when provided
+- checkout and customer emails must be valid email addresses
+- checkout references, plan names, and plan intervals cannot be blank
+
+Validation failures throw `rainwaves\PaystackPayment\Exceptions\InvalidPaymentRequestException`.
+
+### Verification Details
+
+`verifyTransaction()` returns more than the basic status fields. In addition to the reference and amount, the DTO can include:
+
+- `customerEmail`
+- `customerName`
+- `authorizationReusable`
+- `paidAt`
+- `feesInMinor`
+- `channel`
+- `gatewayResponse`
+
+Example:
+
+```php
+$transaction = $payments->verifyTransaction($reference);
+
+if ($transaction->status === 'success' && $transaction->authorizationReusable) {
+    // save reusable authorization details for future billing
+}
+```
+
 ### Webhooks
 
 The package verifies the Paystack webhook signature using the configured webhook secret:
@@ -240,6 +276,18 @@ $verification = $payments->verifyWebhook(new WebhookPayload(
 
 if (! $verification->isValid) {
     abort(401, 'Invalid Paystack webhook signature.');
+}
+```
+
+Webhook helpers are available on the verification DTO:
+
+```php
+if ($verification->isChargeSuccess()) {
+    // activate payment locally
+}
+
+if ($verification->isSubscriptionCreate()) {
+    // persist provider subscription details
 }
 ```
 

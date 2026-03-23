@@ -8,6 +8,7 @@ use rainwaves\PaystackPayment\DTO\CheckoutInitializationData;
 use rainwaves\PaystackPayment\DTO\PlanData;
 use rainwaves\PaystackPayment\DTO\WebhookPayload;
 use rainwaves\PaystackPayment\Drivers\Paystack\PaystackGateway;
+use rainwaves\PaystackPayment\Exceptions\InvalidPaymentRequestException;
 use rainwaves\PaystackPayment\Exceptions\PaymentGatewayException;
 
 class PaystackGatewayTest extends TestCase
@@ -177,5 +178,89 @@ class PaystackGatewayTest extends TestCase
         $this->assertTrue($verification->isValid);
         $this->assertSame('charge.success', $verification->eventType);
         $this->assertSame('ORDER-1001', $verification->reference);
+        $this->assertTrue($verification->isChargeSuccess());
+        $this->assertFalse($verification->isSubscriptionCreate());
+    }
+
+    public function test_it_maps_richer_transaction_verification_fields(): void
+    {
+        $http = new HttpFactory();
+        $http->fake([
+            'https://api.paystack.co/transaction/verify/ORDER-1001' => HttpFactory::response([
+                'data' => [
+                    'reference' => 'ORDER-1001',
+                    'status' => 'success',
+                    'amount' => 12550,
+                    'currency' => 'ZAR',
+                    'paid_at' => '2026-03-23T09:30:00.000Z',
+                    'fees' => 250,
+                    'channel' => 'card',
+                    'gateway_response' => 'Successful',
+                    'customer' => [
+                        'customer_code' => 'CUS_123',
+                        'email' => 'customer@example.com',
+                        'first_name' => 'Joel',
+                        'last_name' => 'Mnisi',
+                    ],
+                    'plan' => [
+                        'plan_code' => 'PLN_123',
+                    ],
+                    'subscription' => [
+                        'subscription_code' => 'SUB_123',
+                    ],
+                    'authorization' => [
+                        'authorization_code' => 'AUTH_123',
+                        'reusable' => true,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $result = new PaystackGateway($http, [
+            'secret_key' => 'sk_test_package',
+            'public_key' => 'pk_test_package',
+            'webhook_secret' => 'whsec_test_package',
+            'base_url' => 'https://api.paystack.co',
+            'currency' => 'ZAR',
+            'timeout' => 15,
+            'retry' => 0,
+        ])->verifyTransaction('ORDER-1001');
+
+        $this->assertSame('customer@example.com', $result->customerEmail);
+        $this->assertSame('Joel Mnisi', $result->customerName);
+        $this->assertSame('AUTH_123', $result->authorizationCode);
+        $this->assertTrue($result->authorizationReusable);
+        $this->assertSame('2026-03-23T09:30:00.000Z', $result->paidAt);
+        $this->assertSame(250, $result->feesInMinor);
+        $this->assertSame('card', $result->channel);
+        $this->assertSame('Successful', $result->gatewayResponse);
+    }
+
+    public function test_it_rejects_invalid_checkout_email(): void
+    {
+        $gateway = $this->gateway();
+
+        $this->expectException(InvalidPaymentRequestException::class);
+        $this->expectExceptionMessage('The checkout email field must contain a valid email address.');
+
+        $gateway->initializeCheckout(new CheckoutInitializationData(
+            reference: 'ORDER-INVALID-EMAIL',
+            email: 'not-an-email',
+            amountInMinor: 12550,
+        ));
+    }
+
+    public function test_it_rejects_non_positive_checkout_amount(): void
+    {
+        $gateway = $this->gateway();
+
+        $this->expectException(InvalidPaymentRequestException::class);
+        $this->expectExceptionMessage('The checkout amount field must be greater than zero.');
+
+        $gateway->initializeCheckout(new CheckoutInitializationData(
+            reference: 'ORDER-ZERO-AMOUNT',
+            email: 'customer@example.com',
+            amountInMinor: 0,
+        ));
     }
 }

@@ -15,6 +15,7 @@ use rainwaves\PaystackPayment\DTO\RefundResult;
 use rainwaves\PaystackPayment\DTO\TransactionVerificationResult;
 use rainwaves\PaystackPayment\DTO\WebhookPayload;
 use rainwaves\PaystackPayment\DTO\WebhookVerificationResult;
+use rainwaves\PaystackPayment\Exceptions\InvalidPaymentRequestException;
 use rainwaves\PaystackPayment\Exceptions\PaymentGatewayException;
 
 class PaystackGateway implements PaymentGatewayInterface
@@ -31,6 +32,8 @@ class PaystackGateway implements PaymentGatewayInterface
 
     public function createCustomer(CustomerData $customer): CustomerResult
     {
+        $this->assertValidEmail($customer->email, 'customer email');
+
         $response = $this->client()->post('/customer', $this->filterPayload([
             'email' => $customer->email,
             'first_name' => $customer->firstName,
@@ -55,6 +58,9 @@ class PaystackGateway implements PaymentGatewayInterface
 
     public function createPlan(PlanData $plan): PlanResult
     {
+        $this->assertPositiveAmount($plan->amountInMinor, 'plan amount');
+        $this->assertNotBlank($plan->name, 'plan name');
+        $this->assertNotBlank($plan->interval, 'plan interval');
         $currency = $this->resolveCurrency($plan->currency);
 
         $response = $this->client()->post('/plan', $this->filterPayload([
@@ -85,6 +91,9 @@ class PaystackGateway implements PaymentGatewayInterface
 
     public function initializeCheckout(CheckoutInitializationData $checkout): CheckoutInitializationResult
     {
+        $this->assertPositiveAmount($checkout->amountInMinor, 'checkout amount');
+        $this->assertNotBlank($checkout->reference, 'checkout reference');
+        $this->assertValidEmail($checkout->email, 'checkout email');
         $currency = $this->resolveCurrency($checkout->currency);
 
         $response = $this->client()->post('/transaction/initialize', $this->filterPayload([
@@ -141,15 +150,28 @@ class PaystackGateway implements PaymentGatewayInterface
             amountInMinor: isset($data['amount']) ? (int) $data['amount'] : null,
             currency: isset($data['currency']) ? (string) $data['currency'] : null,
             customerCode: isset($customer['customer_code']) ? (string) $customer['customer_code'] : null,
+            customerEmail: isset($customer['email']) ? (string) $customer['email'] : null,
+            customerName: $this->resolveCustomerName($customer),
             planCode: isset($plan['plan_code']) ? (string) $plan['plan_code'] : null,
             subscriptionCode: isset($subscription['subscription_code']) ? (string) $subscription['subscription_code'] : null,
             authorizationCode: isset($authorization['authorization_code']) ? (string) $authorization['authorization_code'] : null,
+            authorizationReusable: isset($authorization['reusable']) ? (bool) $authorization['reusable'] : null,
+            paidAt: isset($data['paid_at']) ? (string) $data['paid_at'] : null,
+            feesInMinor: isset($data['fees']) ? (int) $data['fees'] : null,
+            channel: isset($data['channel']) ? (string) $data['channel'] : null,
+            gatewayResponse: isset($data['gateway_response']) ? (string) $data['gateway_response'] : null,
             raw: (array) $response->json(),
         );
     }
 
     public function createRefund(RefundData $refund): RefundResult
     {
+        $this->assertNotBlank($refund->transactionReference, 'refund transaction reference');
+
+        if ($refund->amountInMinor !== null) {
+            $this->assertPositiveAmount($refund->amountInMinor, 'refund amount');
+        }
+
         $response = $this->client()->post('/refund', array_filter([
             'transaction' => $refund->transactionReference,
             'amount' => $refund->amountInMinor,
@@ -242,5 +264,38 @@ class PaystackGateway implements PaymentGatewayInterface
         }
 
         return $resolved;
+    }
+
+    private function assertNotBlank(string $value, string $field): void
+    {
+        if (trim($value) === '') {
+            throw new InvalidPaymentRequestException("The {$field} field is required.");
+        }
+    }
+
+    private function assertValidEmail(string $email, string $field): void
+    {
+        $this->assertNotBlank($email, $field);
+
+        if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new InvalidPaymentRequestException("The {$field} field must contain a valid email address.");
+        }
+    }
+
+    private function assertPositiveAmount(int $amountInMinor, string $field): void
+    {
+        if ($amountInMinor <= 0) {
+            throw new InvalidPaymentRequestException("The {$field} field must be greater than zero.");
+        }
+    }
+
+    private function resolveCustomerName(array $customer): ?string
+    {
+        $name = trim(implode(' ', array_filter([
+            isset($customer['first_name']) ? (string) $customer['first_name'] : null,
+            isset($customer['last_name']) ? (string) $customer['last_name'] : null,
+        ])));
+
+        return $name !== '' ? $name : null;
     }
 }
